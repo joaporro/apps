@@ -58,12 +58,12 @@ function printPlace() {
 }
 
 function formula_costos(utilitario, km_zona_1, km_zona_2, explosivos) {
-	const ZONA_1_UTILITARIOS_CHICO = 0.94;
-	const ZONA_1_UTILITARIOS_MEDIANO = 1.34;
+	const ZONA_1_UTILITARIOS_CHICO = 1.02;
+	const ZONA_1_UTILITARIOS_MEDIANO = 1.38;
 	const ZONA_1_CONDUCTOR_ADICIONAL = 0.43;
 
-	const ZONA_2_UTILITARIOS_CHICO = 1.03;
-	const ZONA_2_UTILITARIOS_MEDIANO = 1.43;
+	const ZONA_2_UTILITARIOS_CHICO = 1.11;
+	const ZONA_2_UTILITARIOS_MEDIANO = 1.47;
 	const ZONA_2_CONDUCTOR_ADICIONAL = 0.52;
 
 	let costo = 0;
