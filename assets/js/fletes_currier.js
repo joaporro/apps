@@ -800,6 +800,8 @@ const tableBody = document.getElementById("tabla1");
 const resultTableBody = document.getElementById("tabla2");
 const total = document.getElementById("pesoFacturableTotal");
 let totalNumber = 0;
+let _dhl_consts = null;
+let _fedex_consts = null;
 
 // Loop through the countries object and add options
 for (const country in countries) {
@@ -1022,6 +1024,8 @@ function calculate_cost_fedex(pais, peso_facturable) {
 		return "Pais No Alcanzado";
 	}
 
+	_fedex_consts = [const_21_44, const_45_70, const_71_inf];
+
 	let costo_final = 0;
 	if (peso_facturable < 20.5) {
 		costo_final = zone_dict[roundToHalf(peso_facturable)];
@@ -1109,6 +1113,8 @@ function calculate_cost_dhl(pais, peso_facturable) {
 		return "Pais No Alcanzado";
 	}
 
+	_dhl_consts = [const_30_70, const_70_300, const_300_3000];
+
 	let costo_final = 0;
 	if (peso_facturable < 10) {
 		costo_final = zone_dict[roundToHalf(peso_facturable)];
@@ -1145,4 +1151,13 @@ calculateButton.addEventListener("click", function () {
 	costo_output_dhl.innerHTML = costo_dhl;
 	costo_output_fedex.innerHTML = costo_fedex;
 	costo_output_total_tag.innerHTML = `Costo Total  (con peso facturable: ${totalNumber} kg)`
+
+	if (_dhl_consts && _fedex_consts) {
+		document.getElementById("const_dhl_30_70").textContent = `${_dhl_consts[0]} USD/kg extra`;
+		document.getElementById("const_dhl_70_300").textContent = `${_dhl_consts[1]} USD/kg extra`;
+		document.getElementById("const_dhl_300_3000").textContent = `${_dhl_consts[2]} USD/kg extra`;
+		document.getElementById("const_fedex_21_44").textContent = `${_fedex_consts[0]} USD/kg extra`;
+		document.getElementById("const_fedex_45_70").textContent = `${_fedex_consts[1]} USD/kg extra`;
+		document.getElementById("const_fedex_71").textContent = `${_fedex_consts[2]} USD/kg extra`;
+	}
 })
