@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notepad</title>
+<style>
+  :root {
+    --bg: #f4f1ea; --paper: #fffdf7; --ink: #2b2b2b; --muted: #8a8577;
+    --line: #e6e0d2; --accent: #3a6ea5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1b1d; --paper: #242427; --ink: #e8e6e1; --muted: #8d8a83; --line: #34343a; --accent: #7aa7d9; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px;
+  }
+  .pad {
+    width: 100%; max-width: 860px; flex: 1;
+    display: flex; flex-direction: column;
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,.06);
+    overflow: hidden;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 10px 14px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 16px; margin: 0 auto 0 0; font-weight: 600; }
+  button {
+    font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 6px;
+    border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  textarea {
+    flex: 1; width: 100%; min-height: 60vh; resize: none; border: 0; outline: 0;
+    padding: 18px; background: transparent; color: var(--ink);
+    font: 16px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  footer {
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+    padding: 8px 14px; border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--muted);
+  }
+  #saved.ok { color: #3f8f4f; }
+</style>
+</head>
+<body>
+<div class="pad">
+  <header>
+    <h1>📝 Notepad</h1>
+    <button id="exportBtn" title="Descargar una copia de seguridad (.txt)">Descargar copia</button>
+    <button id="importBtn" title="Cargar un archivo .txt">Cargar archivo</button>
+    <input type="file" id="fileInput" accept=".txt,text/plain" hidden>
+  </header>
+  <textarea id="note" placeholder="Escribe aquí… se guarda automáticamente." spellcheck="true" autofocus></textarea>
+  <footer>
+    <span id="saved">Cargando…</span>
+    <span id="count">0 caracteres</span>
+  </footer>
+</div>
+
+<script>
+/*
+  Guardado permanente:
+  - Se guarda en localStorage Y en IndexedDB (doble copia).
+  - Se pide al navegador almacenamiento "persistente" para que no lo borre solo.
+  - Los datos solo se pierden si borras manualmente los datos del sitio/navegador.
+  - Usa "Descargar copia" de vez en cuando como respaldo extra.
+*/
+const KEY = 'notepad-content-v1';
+const DB_NAME = 'notepad-db', STORE = 'notes';
+const note = document.getElementById('note');
+const savedEl = document.getElementById('saved');
+const countEl = document.getElementById('count');
+
+// ---- IndexedDB helpers ----
+function openDB() {
+  return new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) return reject('no idb');
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet() {
+  try {
+    const db = await openDB();
+    return await new Promise((res) => {
+      const r = db.transaction(STORE).objectStore(STORE).get(KEY);
+      r.onsuccess = () => res(r.result || null);
+      r.onerror = () => res(null);
+    });
+  } catch { return null; }
+}
+async function idbSet(value) {
+  try {
+    const db = await openDB();
+    db.transaction(STORE, 'readwrite').objectStore(STORE).put(value, KEY);
+  } catch {}
+}
+
+// ---- Load / save ----
+function lsGet() {
+  try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; }
+}
+function lsSet(value) {
+  try { localStorage.setItem(KEY, JSON.stringify(value)); } catch {}
+}
+
+function updateCount() {
+  const t = note.value;
+  const words = t.trim() ? t.trim().split(/\s+/).length : 0;
+  countEl.textContent = `${words} palabras · ${t.length} caracteres`;
+}
+function showSaved(ts) {
+  savedEl.className = 'ok';
+  savedEl.textContent = '✓ Guardado ' + new Date(ts).toLocaleString();
+}
+
+function save() {
+  const value = { text: note.value, updated: Date.now() };
+  lsSet(value);
+  idbSet(value);
+  showSaved(value.updated);
+}
+
+let timer;
+note.addEventListener('input', () => {
+  savedEl.className = '';
+  savedEl.textContent = 'Guardando…';
+  updateCount();
+  clearTimeout(timer);
+  timer = setTimeout(save, 400);
+});
+// Guardar también al cerrar o cambiar de pestaña
+window.addEventListener('beforeunload', save);
+document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+
+(async function init() {
+  // Pedir almacenamiento persistente (evita que el navegador lo borre por falta de espacio)
+  if (navigator.storage && navigator.storage.persist) {
+    try { await navigator.storage.persist(); } catch {}
+  }
+  const a = lsGet(), b = await idbGet();
+  // Usar la copia más reciente de las dos
+  const best = [a, b].filter(Boolean).sort((x, y) => y.updated - x.updated)[0];
+  if (best) {
+    note.value = best.text;
+    showSaved(best.updated);
+    // Re-sincronizar ambas copias
+    lsSet(best); idbSet(best);
+  } else {
+    savedEl.textContent = 'Nuevo bloc de notas';
+  }
+  updateCount();
+})();
+
+// ---- Export / import ----
+document.getElementById('exportBtn').onclick = () => {
+  const blob = new Blob([note.value], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'notas-' + new Date().toISOString().slice(0, 10) + '.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+const fileInput = document.getElementById('fileInput');
+document.getElementById('importBtn').onclick = () => fileInput.click();
+fileInput.onchange = async () => {
+  const f = fileInput.files[0];
+  if (!f) return;
+  if (note.value && !confirm('Esto reemplazará tu nota actual. ¿Continuar?')) return;
+  note.value = await f.text();
+  updateCount();
+  save();
+  fileInput.value = '';
+};
+</script>
+</body>
+</html>
