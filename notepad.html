@@ -10,8 +10,9 @@
     --line: #e6e0d2; --accent: #3a6ea5;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #1b1b1d; --paper: #242427; --ink: #e8e6e1; --muted: #8d8a83; --line: #34343a; --accent: #7aa7d9; }
+    :root:not([data-theme="light"]) { --bg: #1b1b1d; --paper: #242427; --ink: #e8e6e1; --muted: #8d8a83; --line: #34343a; --accent: #7aa7d9; }
   }
+  :root[data-theme="dark"] { --bg: #1b1b1d; --paper: #242427; --ink: #e8e6e1; --muted: #8d8a83; --line: #34343a; --accent: #7aa7d9; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
@@ -48,6 +49,7 @@
     font-size: 12px; color: var(--muted);
   }
   #saved.ok { color: #3f8f4f; }
+  #saved.warn { color: #b5651d; }
 </style>
 </head>
 <body>
@@ -68,18 +70,20 @@
 <script>
 /*
   Guardado permanente:
-  - Se guarda en localStorage Y en IndexedDB (doble copia).
-  - Se pide al navegador almacenamiento "persistente" para que no lo borre solo.
-  - Los datos solo se pierden si borras manualmente los datos del sitio/navegador.
-  - Usa "Descargar copia" de vez en cuando como respaldo extra.
+  - Siempre: se guarda en localStorage Y en IndexedDB (doble copia en este navegador),
+    y se pide almacenamiento "persistente" para que el navegador no lo borre solo.
+  - Abierto en la web (claude.ai): además se guarda en la nube, en tu espacio privado,
+    así lo ves desde cualquier dispositivo y no se pierde si borras el navegador.
+  - "Descargar copia" guarda un .txt como respaldo extra.
 */
 const KEY = 'notepad-content-v1';
 const DB_NAME = 'notepad-db', STORE = 'notes';
+const MAX_CLOUD = 250000; // límite aprox. de un documento en la nube (256 KiB)
 const note = document.getElementById('note');
 const savedEl = document.getElementById('saved');
 const countEl = document.getElementById('count');
 
-// ---- IndexedDB helpers ----
+// ---- IndexedDB ----
 function openDB() {
   return new Promise((resolve, reject) => {
     if (!('indexedDB' in window)) return reject('no idb');
@@ -100,83 +104,115 @@ async function idbGet() {
   } catch { return null; }
 }
 async function idbSet(value) {
+  try { (await openDB()).transaction(STORE, 'readwrite').objectStore(STORE).put(value, KEY); } catch {}
+}
+function lsGet() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
+function lsSet(value) { try { localStorage.setItem(KEY, JSON.stringify(value)); } catch {} }
+
+// ---- Nube (solo cuando se abre en claude.ai) ----
+let cloudRef = null, cloudBusy = false, cloudPending = null, cloudOk = false;
+async function cloudWrite(value) {
+  if (!cloudRef) return;
+  if (value.text.length > MAX_CLOUD) { setStatus('⚠ Nota muy larga para la nube; guardada solo en este navegador', 'warn'); return; }
+  if (cloudBusy) { cloudPending = value; return; }   // una escritura a la vez
+  cloudBusy = true;
   try {
-    const db = await openDB();
-    db.transaction(STORE, 'readwrite').objectStore(STORE).put(value, KEY);
-  } catch {}
+    await cloudRef.set(value);
+    cloudOk = true;
+    if (note.value === value.text) setStatus('✓ Guardado en la nube ' + new Date(value.updated).toLocaleString(), 'ok');
+  } catch (e) {
+    cloudOk = false;
+    setStatus('⚠ Guardado solo en este navegador (sin conexión a la nube)', 'warn');
+  } finally {
+    cloudBusy = false;
+    if (cloudPending) { const v = cloudPending; cloudPending = null; cloudWrite(v); }
+  }
 }
 
-// ---- Load / save ----
-function lsGet() {
-  try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; }
-}
-function lsSet(value) {
-  try { localStorage.setItem(KEY, JSON.stringify(value)); } catch {}
-}
-
+// ---- UI ----
+function setStatus(text, cls) { savedEl.className = cls || ''; savedEl.textContent = text; }
 function updateCount() {
   const t = note.value;
   const words = t.trim() ? t.trim().split(/\s+/).length : 0;
   countEl.textContent = `${words} palabras · ${t.length} caracteres`;
 }
 function showSaved(ts) {
-  savedEl.className = 'ok';
-  savedEl.textContent = '✓ Guardado ' + new Date(ts).toLocaleString();
+  setStatus('✓ Guardado' + (cloudRef ? ' en la nube ' : ' ') + new Date(ts).toLocaleString(), 'ok');
 }
 
+let lastSaved = null;
 function save() {
+  if (note.value === lastSaved) return;
+  lastSaved = note.value;
   const value = { text: note.value, updated: Date.now() };
-  lsSet(value);
-  idbSet(value);
-  showSaved(value.updated);
+  lsSet(value); idbSet(value);
+  if (cloudRef) cloudWrite(value); else showSaved(value.updated);
 }
 
 let timer;
 note.addEventListener('input', () => {
-  savedEl.className = '';
-  savedEl.textContent = 'Guardando…';
+  setStatus('Guardando…');
   updateCount();
   clearTimeout(timer);
-  timer = setTimeout(save, 400);
+  timer = setTimeout(save, 800);
 });
-// Guardar también al cerrar o cambiar de pestaña
 window.addEventListener('beforeunload', save);
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
 
-(async function init() {
-  // Pedir almacenamiento persistente (evita que el navegador lo borre por falta de espacio)
-  if (navigator.storage && navigator.storage.persist) {
-    try { await navigator.storage.persist(); } catch {}
-  }
-  const a = lsGet(), b = await idbGet();
-  // Usar la copia más reciente de las dos
-  const best = [a, b].filter(Boolean).sort((x, y) => y.updated - x.updated)[0];
-  if (best) {
-    note.value = best.text;
-    showSaved(best.updated);
-    // Re-sincronizar ambas copias
-    lsSet(best); idbSet(best);
-  } else {
-    savedEl.textContent = 'Nuevo bloc de notas';
-  }
+function apply(best) {
+  note.value = best.text;
+  lastSaved = best.text;
   updateCount();
+  showSaved(best.updated);
+}
+
+(async function init() {
+  if (navigator.storage && navigator.storage.persist) { try { await navigator.storage.persist(); } catch {} }
+  const local = [lsGet(), await idbGet()].filter(Boolean).sort((x, y) => y.updated - x.updated)[0] || null;
+  if (local) { apply(local); lsSet(local); idbSet(local); }
+  else { setStatus('Nuevo bloc de notas'); updateCount(); }
+
+  // Conectar a la nube si estamos en claude.ai
+  if (!(window.claude && window.claude.use)) return;
+  try {
+    const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
+    const uid = db && user ? await user.id() : null;
+    if (!uid) return;
+    const ref = db.doc('data/users/' + uid + '/note');
+    const snap = await ref.get();
+    const remote = snap.exists ? snap.data() : null;
+    cloudRef = ref;
+    const typedMeanwhile = note.value !== (local ? local.text : '');
+    if (remote && typeof remote.text === 'string' && (!local || remote.updated > local.updated) && !typedMeanwhile) {
+      apply(remote); lsSet(remote); idbSet(remote);
+    } else if (note.value) {
+      lastSaved = null; save(); // subir la versión local más nueva
+    } else {
+      setStatus('Nuevo bloc de notas · se guardará en la nube');
+    }
+  } catch { /* sin nube: sigue funcionando en el navegador */ }
 })();
 
-// ---- Export / import ----
-document.getElementById('exportBtn').onclick = () => {
+// ---- Descargar / cargar ----
+document.getElementById('exportBtn').onclick = async () => {
+  const filename = 'notas-' + new Date().toISOString().slice(0, 10) + '.txt';
+  if (window.claude && window.claude.use) {
+    const dl = await claude.use('downloads').catch(() => null);
+    if (dl) { try { await dl.save({ filename, data: note.value }); } catch {} return; }
+  }
   const blob = new Blob([note.value], { type: 'text/plain;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'notas-' + new Date().toISOString().slice(0, 10) + '.txt';
+  a.download = filename;
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
 const fileInput = document.getElementById('fileInput');
 document.getElementById('importBtn').onclick = () => fileInput.click();
 fileInput.onchange = async () => {
   const f = fileInput.files[0];
   if (!f) return;
-  if (note.value && !confirm('Esto reemplazará tu nota actual. ¿Continuar?')) return;
+  if (note.value && !confirm('Esto reemplazará tu nota actual. ¿Continuar?')) { fileInput.value = ''; return; }
   note.value = await f.text();
   updateCount();
   save();
